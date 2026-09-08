@@ -329,6 +329,7 @@ class MainActivity : ComponentActivity() {
                           onNavigateToManagedBy = { navController.navigate("managedBy") },
                           onNavigateToUserSwitcher = { navController.navigate("userSwitcher") },
                           onNavigateToPermissions = { navController.navigate("permissions") },
+                          onNavigateToWatchLogs = { navController.navigate("watchLogs") },
                           onBackToSettings = backTo("settings"),
                           onNavigateBackHome = backTo("main"))
                   val exitNodePickerNav =
@@ -398,6 +399,9 @@ class MainActivity : ComponentActivity() {
                   composable("mdmSettings") { MDMSettingsDebugView(backTo("settings")) }
                   composable("managedBy") { ManagedByView(backTo("settings")) }
                   composable("userSwitcher") { UserSwitcherView(userSwitcherNav) }
+                  composable("watchLogs") {
+                    com.tailscale.ipn.nena.WatchLogsView(onNavigateBack = backTo("settings"))
+                  }
                   composable("permissions") {
                     PermissionsView(
                         backTo("settings"),

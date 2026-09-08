@@ -145,6 +145,12 @@ fun SettingsView(
           }
 
           Lists.SectionDivider()
+          Setting.Text(
+              title = "Pull watch logs",
+              subtitle = "Diagnose a watch over Wi-Fi debugging",
+              onClick = settingsNav.onNavigateToWatchLogs)
+
+          Lists.SectionDivider()
           Setting.Text(R.string.bug_report, onClick = settingsNav.onNavigateToBugReport)
 
           Lists.ItemDivider()
@@ -278,5 +284,5 @@ fun SettingsPreview() {
   vm.tailNetLockEnabled.set(true)
   vm.isAdmin.set(true)
   vm.managedByOrganization.set("Tails and Scales Inc.")
-  SettingsView(SettingsNav({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}), vm)
+  SettingsView(SettingsNav({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}), vm)
 }
