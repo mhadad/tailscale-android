@@ -25,6 +25,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,12 +44,40 @@ fun WatchLogsView(onNavigateBack: () -> Unit) {
     val connectState by viewModel.connectState.collectAsState()
     val uploadState by viewModel.uploadState.collectAsState()
     val discoveryState by viewModel.discoveryState.collectAsState()
+    val agentBaseUrl by viewModel.agentBaseUrl.collectAsState()
 
     var host by remember { mutableStateOf("") }
     var pairPort by remember { mutableStateOf("") }
     var pairCode by remember { mutableStateOf("") }
     var connectPort by remember { mutableStateOf("") }
-    var agentBaseUrl by remember { mutableStateOf("") }
+
+    // Auto-fill from the first discovered watch as soon as a scan finds one, instead of
+    // requiring a manual tap on the "Nearby watches" list - there's consistently been only
+    // one watch on this network, so this is the common case, not an edge case. A tap on a
+    // specific row (below) still works too, e.g. to switch to a different watch.
+    //
+    // The pairing port (and its code) are single-use and rotate every time the watch's own
+    // "Pair new device" screen is reopened - unlike the IP and the stable always-on connect
+    // port, which only need filling once, the pairing port must always track the *latest*
+    // scan result, or pairing will keep failing against a port the watch has already moved
+    // on from (confirmed empirically: repeated "protocol fault"/"Connection refused" pair
+    // failures against a stale port after the watch generated a fresh one).
+    LaunchedEffect(discoveryState) {
+        val state = discoveryState
+        if (state is NenaUiState.Success) {
+            val relevant = state.data.filter { it.kind != AdbBridge.ServiceKind.OTHER }
+            val targetHost = (if (host.isBlank()) relevant.firstOrNull()?.host else host)
+                ?: return@LaunchedEffect
+            val servicesAtHost = relevant.filter { it.host == targetHost }
+            if (host.isBlank()) {
+                host = targetHost
+                servicesAtHost.firstOrNull { it.kind == AdbBridge.ServiceKind.CONNECT }
+                    ?.let { connectPort = it.port.toString() }
+            }
+            servicesAtHost.firstOrNull { it.kind == AdbBridge.ServiceKind.PAIRING }
+                ?.let { pairPort = it.port.toString() }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -219,7 +248,7 @@ fun WatchLogsView(onNavigateBack: () -> Unit) {
                     Text("Step 3 - Pull & upload", style = MaterialTheme.typography.titleSmall)
                     OutlinedTextField(
                         value = agentBaseUrl,
-                        onValueChange = { agentBaseUrl = it },
+                        onValueChange = { viewModel.updateAgentBaseUrl(it) },
                         label = { Text("agent-service URL (Tailscale hostname/IP)") },
                         placeholder = { Text("https://agent-service.your-tailnet.ts.net") },
                         singleLine = true,

@@ -1,0 +1,69 @@
+default_platform(:android)
+
+# Reads the Firebase Android app id straight from android/google-services.json so it
+# never has to be hardcoded or duplicated as a secret. Override with FIREBASE_APP_ID
+# if you ever need to point at a different app.
+def firebase_app_id
+  return ENV["FIREBASE_APP_ID"] unless ENV["FIREBASE_APP_ID"].to_s.empty?
+  require "json"
+  path = File.expand_path("../android/google-services.json", __dir__)
+  UI.user_error!("google-services.json not found at #{path}") unless File.exist?(path)
+  data = JSON.parse(File.read(path))
+  data.fetch("client").first.fetch("client_info").fetch("mobilesdk_app_id")
+end
+
+# Picks the auth mode for firebase_app_distribution. Downloadable service-account
+# keys are blocked by the org policy iam.disableServiceAccountKeyCreation, so the
+# primary path is a Firebase CLI token (FIREBASE_TOKEN). Also supports keyless
+# Workload Identity Federation / ADC: if GOOGLE_APPLICATION_CREDENTIALS points at an
+# external_account (WIF) file we pass nothing and let the plugin use ADC; a plain
+# service-account json (should policy ever allow one) is passed explicitly.
+def firebase_auth
+  token = ENV["FIREBASE_TOKEN"].to_s
+  return { firebase_cli_token: token } unless token.empty?
+
+  creds = ENV["GOOGLE_APPLICATION_CREDENTIALS"].to_s
+  return {} if creds.empty?
+
+  require "json"
+  type = (JSON.parse(File.read(creds))["type"] rescue nil)
+  type == "external_account" ? {} : { service_credentials_file: creds }
+end
+
+platform :android do
+  desc "Build the debug APK, run unit tests, and ship it to testers via Firebase App Distribution"
+  lane :distribute do
+    # Fail fast on compile/unit-test errors before uploading anything. This single
+    # make target already builds the embedded-VPN Go core (libgojni.so), then runs
+    # `./gradlew test assembleDebug` inside android/ - same as CI's own existing
+    # android.yml workflow.
+    sh("make", "-C", "..", "tailscale-debug.apk")
+
+    sha = ENV["GITHUB_SHA"].to_s
+    ref = ENV["GITHUB_REF_NAME"] || "local"
+    notes = "#{ref} @ #{sha.empty? ? 'local' : sha[0, 7]}"
+
+    # Target testers by email (FIREBASE_TESTER_EMAILS, comma-separated) if given —
+    # simplest for a single person, no group needed. Otherwise fall back to a group
+    # (FIREBASE_TESTER_GROUPS), defaulting to "testers".
+    emails = ENV["FIREBASE_TESTER_EMAILS"].to_s
+    groups = ENV["FIREBASE_TESTER_GROUPS"].to_s
+    recipients =
+      if !emails.empty?
+        { testers: emails }
+      else
+        { groups: groups.empty? ? "testers" : groups }
+      end
+
+    firebase_app_distribution(
+      app: firebase_app_id,
+      android_artifact_type: "APK",
+      apk_path: "android/build/outputs/apk/debug/android-debug.apk",
+      release_notes: notes,
+      **firebase_auth,
+      **recipients
+    )
+
+    UI.success("Distributed #{notes} to #{recipients.values.first}")
+  end
+end

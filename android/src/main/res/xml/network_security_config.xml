@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nena: allows plain HTTP specifically to agent-service's Tailscale IP - Android blocks
+  all cleartext traffic by default (API 28+). This traffic never leaves the private
+  tailnet (already encrypted at the WireGuard layer by Tailscale itself), so this is a
+  narrowly-scoped exception rather than a blanket cleartextTrafficPermitted for the whole
+  app. Everything else (including real internet traffic) stays on the default HTTPS-only
+  policy below.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.125.117.100</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

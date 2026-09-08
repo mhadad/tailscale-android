@@ -28,6 +28,10 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 private const val TAG = "NenaWatchLogsViewModel"
+private const val KEY_AGENT_BASE_URL = "agent_base_url"
+// Nena: this Linux machine's Tailscale IP, running agent-service on :8080 - only used as
+// the seed value the very first time (before anything's been saved to prefs).
+private const val DEFAULT_AGENT_BASE_URL = "http://100.125.117.100:8080"
 
 sealed class NenaUiState<out T> {
     data object Idle : NenaUiState<Nothing>()
@@ -53,6 +57,19 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
     private val adb = AdbBridge(application)
     private val http = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
+
+    // Persists the agent-service URL across sessions - it's a fixed property of wherever
+    // agent-service is deployed (this machine's Tailscale IP/hostname), not something that
+    // should need retyping every time this screen is reopened.
+    private val prefs = application.getSharedPreferences("nena_watch_bridge", Context.MODE_PRIVATE)
+    private val _agentBaseUrl =
+        MutableStateFlow(prefs.getString(KEY_AGENT_BASE_URL, DEFAULT_AGENT_BASE_URL) ?: DEFAULT_AGENT_BASE_URL)
+    val agentBaseUrl: StateFlow<String> = _agentBaseUrl
+
+    fun updateAgentBaseUrl(url: String) {
+        _agentBaseUrl.value = url
+        prefs.edit().putString(KEY_AGENT_BASE_URL, url).apply()
+    }
 
     private val _pairState = MutableStateFlow<NenaUiState<Unit>>(NenaUiState.Idle)
     val pairState: StateFlow<NenaUiState<Unit>> = _pairState
@@ -98,9 +115,17 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
             // asking for results - much longer than a bare "just started" race, since mDNS
             // discovery itself needs at least one real query/response round trip.
             kotlinx.coroutines.delay(2_000)
-            scanForNearbyWatches()
-            kotlinx.coroutines.delay(3_000)
-            scanForNearbyWatches()
+
+            // Keep re-scanning periodically for as long as this screen is open, rather than
+            // a one-shot pair of scans - the pairing port/code the watch broadcasts rotates
+            // every time its own "Pair new device" screen is reopened, so a single scan can
+            // go stale (confirmed empirically: pairing kept failing against a port the watch
+            // had already moved on from). This keeps the auto-filled pairing port current
+            // without the user needing to keep tapping refresh manually.
+            while (true) {
+                scanForNearbyWatches()
+                kotlinx.coroutines.delay(5_000)
+            }
         }
     }
 
@@ -176,7 +201,20 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** Pulls bugreport + logcat from the connected watch and uploads both to [agentBaseUrl]. */
+    /**
+     * Pulls logcat from the connected watch and uploads it to [agentBaseUrl].
+     *
+     * Deliberately does NOT pull a full bugreport: `adb bugreport -` (streaming to stdout)
+     * failed with "cannot create '-.zip': Read-only file system" - the local adb client
+     * writes a real temp file before streaming rather than truly streaming to stdout, and
+     * our process has no writable working directory set. Even fixed, a bugreport zip is
+     * binary, but the upload path here (and agent-service's LogUploadRequest) treats
+     * content as plain text - a real fix needs base64 (or multipart) support end to end,
+     * not just a local file-path change. logcat is plain text and fits as-is, and is far
+     * faster/smaller, which also matters given the intermittent Wi-Fi drops observed
+     * between phone and watch (a multi-minute bugreport pull is much more likely to land
+     * on a drop than a near-instant logcat dump).
+     */
     fun pullAndUpload(agentBaseUrl: String) {
         val address = deviceAddress
         if (address == null) {
@@ -194,12 +232,10 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
                     // only reachable through Tailscale.
                     val model = adb.deviceModel(address)
                     val version = adb.androidVersion(address)
-                    val bugreport = adb.pullBugreport(address)
                     val logcat = adb.pullLogcat(address)
 
                     resumeVpnIfNeeded()
 
-                    uploadLog(agentBaseUrl, sessionId, address, model, version, "BUGREPORT", bugreport)
                     uploadLog(agentBaseUrl, sessionId, address, model, version, "LOGCAT", logcat)
 
                     sessionId
