@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1061294042473",
+    "project_id": "nena-watch-bridge-49743",
+    "storage_bucket": "nena-watch-bridge-49743.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1061294042473:android:0c0fca3248782f66b6e1f8",
+        "android_client_info": {
+          "package_name": "com.tailscale.ipn"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXlctu0NUC-vJjUxv3ULLu5byV1qchZmI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
