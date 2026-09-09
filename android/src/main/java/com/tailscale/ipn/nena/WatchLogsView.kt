@@ -245,18 +245,13 @@ fun WatchLogsView(onNavigateBack: () -> Unit) {
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Step 3 - Pull & upload", style = MaterialTheme.typography.titleSmall)
-                    OutlinedTextField(
-                        value = agentBaseUrl,
-                        onValueChange = { viewModel.updateAgentBaseUrl(it) },
-                        label = { Text("agent-service URL (Tailscale hostname/IP)") },
-                        placeholder = { Text("https://agent-service.your-tailnet.ts.net") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    // The agent-service URL field itself is hidden - it's persisted (see
+                    // WatchLogsViewModel.agentBaseUrl) and defaults to this deployment's
+                    // known Tailscale address, so there's nothing left for the user to
+                    // fill in here; just the action.
                     StatusRow(
                         state = uploadState,
-                        buttonLabel = "Pull & upload",
+                        buttonLabel = "Stream logs",
                         enabled = connectState is NenaUiState.Success && agentBaseUrl.isNotBlank(),
                         onClick = { viewModel.pullAndUpload(agentBaseUrl.trim()) },
                     )
