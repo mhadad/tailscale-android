@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,6 +57,7 @@ fun NenaHomeScaffold(
     appViewModel: AppViewModel,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(NenaTab.HOME) }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
     val watchLogsViewModel: WatchLogsViewModel = viewModel()
     val isOn by mainViewModel.vpnToggleState.collectAsState(initial = false)
     val disableToggle = !mainViewModel.isToggleInProgress.value
@@ -75,9 +77,15 @@ fun NenaHomeScaffold(
                         onCheckedChange = { desired -> mainViewModel.toggleVpn(desired) },
                     )
                 },
-                title = { Text(selectedTab.label) },
+                title = { Text(if (searchActive) "Search" else selectedTab.label) },
                 actions = {
                     if (selectedTab == NenaTab.HOME) {
+                        // Search: fetches over HTTP, but stays connected to a WebSocket for
+                        // as long as it's open purely to receive server-pushed "refresh"/
+                        // "stop" commands - see SearchViewModel.
+                        IconButton(onClick = { searchActive = !searchActive }) {
+                            Icon(Icons.Filled.Search, contentDescription = "Search")
+                        }
                         IconButton(onClick = { watchLogsViewModel.scanForNearbyWatches() }) {
                             if (discoveryState is NenaUiState.Loading) {
                                 CircularProgressIndicator(modifier = Modifier.padding(4.dp))
@@ -118,23 +126,24 @@ fun NenaHomeScaffold(
             }
         },
     ) { padding ->
-        when (selectedTab) {
-            NenaTab.HOME -> WatchLogsContent(
+        when {
+            selectedTab == NenaTab.HOME && searchActive -> SearchView(modifier = Modifier.padding(padding))
+            selectedTab == NenaTab.HOME -> WatchLogsContent(
                 viewModel = watchLogsViewModel,
                 modifier = Modifier.padding(padding),
                 showDiscoveryHeader = false,
             )
-            NenaTab.ACTIVITY -> PlaceholderTabContent(
+            selectedTab == NenaTab.ACTIVITY -> PlaceholderTabContent(
                 modifier = Modifier.padding(padding),
                 message = "Past pull/upload sessions will show up here.",
             )
-            NenaTab.PAYMENTS -> PlaceholderTabContent(
+            selectedTab == NenaTab.PAYMENTS -> PlaceholderTabContent(
                 modifier = Modifier.padding(padding),
                 message = "Nothing to show yet.",
             )
             // Settings keeps using the existing full SettingsView/nav graph as-is (bug report,
             // DNS, tailnet lock, etc. all still reachable from within it).
-            NenaTab.SETTINGS -> Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+            else -> Column(modifier = Modifier.padding(padding).fillMaxSize()) {
                 SettingsView(settingsNav = settingsNav, appViewModel = appViewModel)
             }
         }
