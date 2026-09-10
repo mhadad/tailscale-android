@@ -57,6 +57,14 @@ jobs:
 
       - name: Build + distribute to testers
         env:
+          # Forces plain module mode for the embedded Go core's build (./tool/go run
+          # tailscale.com/cmd/mkversion, invoked by `make tailscale-debug.apk`).
+          # This repo has no vendor/ directory at all, but the CI runner was
+          # observed going into vendor mode anyway (likely inherited from
+          # actions/setup-go's own environment/cache) and failing with "explicitly
+          # required in go.mod, but not marked as explicit in vendor/modules.txt" -
+          # confirmed NOT reproducible locally, so this is CI-environment-specific.
+          GOFLAGS: -mod=mod
           # Firebase CLI token (service-account keys are blocked by org policy).
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           # Set EITHER FIREBASE_TESTER_EMAILS (comma-separated, no group needed) OR
