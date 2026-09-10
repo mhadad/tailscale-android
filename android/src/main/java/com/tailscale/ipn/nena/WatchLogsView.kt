@@ -36,10 +36,44 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
+/**
+ * Standalone screen wrapper (reachable from Settings -> "Pull watch logs") around
+ * [WatchLogsContent] - the same content now also embedded directly as the Home tab's
+ * body (see [com.tailscale.ipn.nena.HomeView]), which owns its own top bar (VPN toggle
+ * + refresh) instead of this screen's back-button app bar.
+ */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun WatchLogsView(onNavigateBack: () -> Unit) {
     val viewModel: WatchLogsViewModel = viewModel()
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Pull watch logs") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        WatchLogsContent(viewModel = viewModel, modifier = Modifier.padding(padding), showDiscoveryHeader = true)
+    }
+}
+
+/**
+ * The actual pairing/connect/stream-logs UI, extracted so it can be embedded either inside
+ * [WatchLogsView]'s own screen or directly as [HomeView]'s body. When [showDiscoveryHeader] is
+ * false (the Home tab case), the "Nearby watches" card's own refresh button is omitted since
+ * Home's top bar already has one wired to the same [WatchLogsViewModel.scanForNearbyWatches].
+ */
+@Composable
+fun WatchLogsContent(
+    viewModel: WatchLogsViewModel,
+    modifier: Modifier = Modifier,
+    showDiscoveryHeader: Boolean = false,
+) {
     val pairState by viewModel.pairState.collectAsState()
     val connectState by viewModel.connectState.collectAsState()
     val uploadState by viewModel.uploadState.collectAsState()
@@ -79,41 +113,29 @@ fun WatchLogsView(onNavigateBack: () -> Unit) {
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Pull watch logs") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Text(
-                "Connects to a watch on this phone's local network (e.g. its own hotspot), " +
-                    "pulls a bugreport + logcat, and uploads them to your agent-service - reachable " +
-                    "here through Tailscale, even on a different network/region.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Text(
+            "Connects to a watch on this phone's local network (e.g. its own hotspot), " +
+                "pulls a bugreport + logcat, and uploads them to your agent-service - reachable " +
+                "here through Tailscale, even on a different network/region.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Nearby watches", style = MaterialTheme.typography.titleSmall)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Nearby watches", style = MaterialTheme.typography.titleSmall)
+                    if (showDiscoveryHeader) {
                         IconButton(onClick = { viewModel.scanForNearbyWatches() }) {
                             if (discoveryState is NenaUiState.Loading) {
                                 CircularProgressIndicator(modifier = Modifier.padding(4.dp))
@@ -122,140 +144,140 @@ fun WatchLogsView(onNavigateBack: () -> Unit) {
                             }
                         }
                     }
-                    when (val state = discoveryState) {
-                        is NenaUiState.Success -> {
-                            // Group by IP: a watch usually broadcasts its pairing and connect
-                            // services simultaneously while "Pair new device" is open, so one
-                            // tap can fill the IP and both ports at once - only the code stays
-                            // manual, since that's the actual security factor.
-                            val byHost = state.data
-                                .filter { it.kind != AdbBridge.ServiceKind.OTHER }
-                                .groupBy { it.host }
-                            if (byHost.isEmpty()) {
-                                Text(
-                                    "No watches found yet. Make sure wireless debugging is on and " +
-                                        "you're on the same network, then tap refresh.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            } else {
-                                byHost.forEach { (candidateHost, servicesAtHost) ->
-                                    val pairing = servicesAtHost.firstOrNull { it.kind == AdbBridge.ServiceKind.PAIRING }
-                                    val connect = servicesAtHost.firstOrNull { it.kind == AdbBridge.ServiceKind.CONNECT }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                host = candidateHost
-                                                pairing?.let { pairPort = it.port.toString() }
-                                                connect?.let { connectPort = it.port.toString() }
-                                            }
-                                            .padding(vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        Column {
-                                            Text(
-                                                pairing?.name ?: connect?.name ?: candidateHost,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                            )
-                                            Text(candidateHost, style = MaterialTheme.typography.bodySmall)
+                }
+                when (val state = discoveryState) {
+                    is NenaUiState.Success -> {
+                        // Group by IP: a watch usually broadcasts its pairing and connect
+                        // services simultaneously while "Pair new device" is open, so one
+                        // tap can fill the IP and both ports at once - only the code stays
+                        // manual, since that's the actual security factor.
+                        val byHost = state.data
+                            .filter { it.kind != AdbBridge.ServiceKind.OTHER }
+                            .groupBy { it.host }
+                        if (byHost.isEmpty()) {
+                            Text(
+                                "No watches found yet. Make sure wireless debugging is on and " +
+                                    "you're on the same network, then tap refresh.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        } else {
+                            byHost.forEach { (candidateHost, servicesAtHost) ->
+                                val pairing = servicesAtHost.firstOrNull { it.kind == AdbBridge.ServiceKind.PAIRING }
+                                val connect = servicesAtHost.firstOrNull { it.kind == AdbBridge.ServiceKind.CONNECT }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            host = candidateHost
+                                            pairing?.let { pairPort = it.port.toString() }
+                                            connect?.let { connectPort = it.port.toString() }
                                         }
-                                        Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
-                                            if (pairing != null) {
-                                                Text(
-                                                    "Pairing :${pairing.port}",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                )
-                                            }
-                                            if (connect != null) {
-                                                Text(
-                                                    "Connect :${connect.port}",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                )
-                                            }
+                                        .padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column {
+                                        Text(
+                                            pairing?.name ?: connect?.name ?: candidateHost,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Text(candidateHost, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                                        if (pairing != null) {
+                                            Text(
+                                                "Pairing :${pairing.port}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                        if (connect != null) {
+                                            Text(
+                                                "Connect :${connect.port}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
-                        is NenaUiState.Error -> Text(state.message, color = MaterialTheme.colorScheme.error)
-                        else -> Unit
                     }
+                    is NenaUiState.Error -> Text(state.message, color = MaterialTheme.colorScheme.error)
+                    else -> Unit
                 }
             }
+        }
 
-            OutlinedTextField(
-                value = host,
-                onValueChange = { host = it },
-                label = { Text("Watch IP address") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        OutlinedTextField(
+            value = host,
+            onValueChange = { host = it },
+            label = { Text("Watch IP address") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Step 1 - Pair", style = MaterialTheme.typography.titleSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedTextField(
-                            value = pairPort,
-                            onValueChange = { if (it.all(Char::isDigit)) pairPort = it },
-                            label = { Text("Pairing port") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedTextField(
-                            value = pairCode,
-                            onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pairCode = it },
-                            label = { Text("Pairing code") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    StatusRow(
-                        state = pairState,
-                        buttonLabel = "Pair",
-                        enabled = host.isNotBlank() && pairPort.toIntOrNull() != null && pairCode.length == 6,
-                        onClick = { viewModel.pair(host.trim(), pairPort.toInt(), pairCode) },
-                    )
-                }
-            }
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Step 2 - Connect", style = MaterialTheme.typography.titleSmall)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Step 1 - Pair", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
-                        value = connectPort,
-                        onValueChange = { if (it.all(Char::isDigit)) connectPort = it },
-                        label = { Text("Debugging port") },
+                        value = pairPort,
+                        onValueChange = { if (it.all(Char::isDigit)) pairPort = it },
+                        label = { Text("Pairing port") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.weight(1f),
                     )
-                    StatusRow(
-                        state = connectState,
-                        buttonLabel = "Connect",
-                        enabled = host.isNotBlank() && connectPort.toIntOrNull() != null,
-                        onClick = { viewModel.connect(host.trim(), connectPort.toInt()) },
+                    OutlinedTextField(
+                        value = pairCode,
+                        onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pairCode = it },
+                        label = { Text("Pairing code") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
                     )
                 }
+                StatusRow(
+                    state = pairState,
+                    buttonLabel = "Pair",
+                    enabled = host.isNotBlank() && pairPort.toIntOrNull() != null && pairCode.length == 6,
+                    onClick = { viewModel.pair(host.trim(), pairPort.toInt(), pairCode) },
+                )
             }
+        }
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // The agent-service URL field itself is hidden - it's persisted (see
-                    // WatchLogsViewModel.agentBaseUrl) and defaults to this deployment's
-                    // known Tailscale address, so there's nothing left for the user to
-                    // fill in here; just the action.
-                    StatusRow(
-                        state = uploadState,
-                        buttonLabel = "Stream logs",
-                        enabled = connectState is NenaUiState.Success && agentBaseUrl.isNotBlank(),
-                        onClick = { viewModel.pullAndUpload(agentBaseUrl.trim()) },
-                    )
-                }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Step 2 - Connect", style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = connectPort,
+                    onValueChange = { if (it.all(Char::isDigit)) connectPort = it },
+                    label = { Text("Debugging port") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                StatusRow(
+                    state = connectState,
+                    buttonLabel = "Connect",
+                    enabled = host.isNotBlank() && connectPort.toIntOrNull() != null,
+                    onClick = { viewModel.connect(host.trim(), connectPort.toInt()) },
+                )
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // The agent-service URL field itself is hidden - it's persisted (see
+                // WatchLogsViewModel.agentBaseUrl) and defaults to this deployment's
+                // known Tailscale address, so there's nothing left for the user to
+                // fill in here; just the action.
+                StatusRow(
+                    state = uploadState,
+                    buttonLabel = "Stream logs",
+                    enabled = connectState is NenaUiState.Success && agentBaseUrl.isNotBlank(),
+                    onClick = { viewModel.pullAndUpload(agentBaseUrl.trim()) },
+                )
             }
         }
     }

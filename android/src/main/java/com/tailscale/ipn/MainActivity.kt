@@ -353,10 +353,14 @@ class MainActivity : ComponentActivity() {
                           onNavigateToAuthKey = { navController.navigate("loginWithAuthKey") })
 
                   composable("main", enterTransition = { fadeIn(animationSpec = tween(150)) }) {
-                    MainView(
-                        loginAtUrl = ::login,
-                        navigation = mainViewNav,
-                        viewModel = viewModel,
+                    // Home is now the watch-bridge screen (Pull watch logs), not the peer
+                    // list - see NenaHomeScaffold. MainView (peer list/login flow) is no
+                    // longer reached directly from here; the VPN toggle it used to own is
+                    // promoted into NenaHomeScaffold's own top bar instead.
+                    com.tailscale.ipn.nena.NenaHomeScaffold(
+                        mainViewModel = viewModel,
+                        settingsNav = settingsNav,
+                        appViewModel = appViewModel,
                     )
                   }
                   composable("search") {
