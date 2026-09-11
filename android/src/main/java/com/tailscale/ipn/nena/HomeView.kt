@@ -60,8 +60,9 @@ fun NenaHomeScaffold(
     var searchActive by rememberSaveable { mutableStateOf(false) }
     val watchLogsViewModel: WatchLogsViewModel = viewModel()
     val isOn by mainViewModel.vpnToggleState.collectAsState(initial = false)
-    val disableToggle = !mainViewModel.isToggleInProgress.value
+    val toggleEnabled = !mainViewModel.isToggleInProgress.value
     val discoveryState by watchLogsViewModel.discoveryState.collectAsState()
+    val loggedInUser by mainViewModel.loggedInUser.collectAsState()
 
     Scaffold(
         topBar = {
@@ -73,8 +74,22 @@ fun NenaHomeScaffold(
                     // netmap header row that used to live above it.
                     TintedSwitch(
                         checked = isOn,
-                        enabled = disableToggle,
-                        onCheckedChange = { desired -> mainViewModel.toggleVpn(desired) },
+                        enabled = toggleEnabled,
+                        onCheckedChange = { desired ->
+                            // toggleVpn() alone only requests the OS VpnService permission
+                            // grant - it never starts an actual login flow. With no session
+                            // (never logged in, or NeedsLogin), tapping the switch to turn
+                            // it on did nothing visible at all (confirmed: this is exactly
+                            // what "couldn't toggle it on" turned out to be) since MainView's
+                            // own dedicated "Log in" button - now gone, since Home no longer
+                            // renders ConnectView - used to be the only thing that actually
+                            // called login().
+                            if (desired && loggedInUser == null) {
+                                mainViewModel.login()
+                            } else {
+                                mainViewModel.toggleVpn(desired)
+                            }
+                        },
                     )
                 },
                 title = { Text(if (searchActive) "Search" else selectedTab.label) },
