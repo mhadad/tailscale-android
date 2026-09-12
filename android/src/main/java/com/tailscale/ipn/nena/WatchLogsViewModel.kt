@@ -161,7 +161,14 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
         if (vpnWasRunningBeforePause && Notifier.state.value != Ipn.State.Running) {
             Log.d(TAG, "resuming VPN")
             App.get().startVPN()
-            withTimeoutOrNull(10_000) { Notifier.state.first { it == Ipn.State.Running } }
+            val reachedRunning = withTimeoutOrNull(10_000) { Notifier.state.first { it == Ipn.State.Running } }
+            if (reachedRunning == null) {
+                Log.w(TAG, "VPN did not reach Running within 10s of startVPN() - upload will likely fail to reach agent-service")
+            } else {
+                Log.d(TAG, "VPN resumed, now Running")
+            }
+        } else {
+            Log.d(TAG, "VPN resume not needed (wasRunningBeforePause=$vpnWasRunningBeforePause, currentState=${Notifier.state.value})")
         }
     }
 
@@ -189,6 +196,14 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun connect(host: String, port: Int) {
+        // Defense-in-depth alongside the UI's own disabled-until-paired button: connecting
+        // to a watch this session hasn't successfully paired with yet either hangs on a TLS
+        // handshake the watch never completes, or fails outright - fail fast with a clear
+        // message instead.
+        if (pairState.value !is NenaUiState.Success) {
+            _connectState.value = NenaUiState.Error("Pair with the watch first")
+            return
+        }
         viewModelScope.launch {
             _connectState.value = NenaUiState.Loading
             _connectState.value = when (val result = adb.connect(host, port)) {
@@ -226,6 +241,7 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
             _uploadState.value = runCatching {
                 withContext(Dispatchers.IO) {
                     val sessionId = UUID.randomUUID().toString()
+                    Log.d(TAG, "pullAndUpload starting: session=$sessionId device=$address agentBaseUrl=$agentBaseUrl")
 
                     // Pull everything from the watch first, while the VPN is still paused
                     // for this session, then resume it before uploading - agent-service is
@@ -233,16 +249,21 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
                     val model = adb.deviceModel(address)
                     val version = adb.androidVersion(address)
                     val logcat = adb.pullLogcat(address)
+                    Log.d(TAG, "pulled from watch: model=$model androidVersion=$version logcatBytes=${logcat.length}")
 
                     resumeVpnIfNeeded()
 
                     uploadLog(agentBaseUrl, sessionId, address, model, version, "LOGCAT", logcat)
+                    Log.d(TAG, "upload succeeded: session=$sessionId")
 
                     sessionId
                 }
             }.fold(
                 onSuccess = { sessionId -> NenaUiState.Success("Uploaded (session $sessionId)") },
-                onFailure = { NenaUiState.Error(it.message ?: "Upload failed") },
+                onFailure = { error ->
+                    Log.e(TAG, "pullAndUpload failed", error)
+                    NenaUiState.Error(error.message ?: "Upload failed")
+                },
             )
         }
     }
@@ -266,14 +287,26 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
             content = content,
         )
         val body = json.encodeToString(request).toRequestBody("application/json".toMediaType())
+        val url = "${agentBaseUrl.trimEnd('/')}/v1/logs"
         val httpRequest = Request.Builder()
-            .url("${agentBaseUrl.trimEnd('/')}/v1/logs")
+            .url(url)
             .post(body)
             .build()
-        http.newCall(httpRequest).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw java.io.IOException("Upload failed for $source: HTTP ${response.code}")
+        Log.d(TAG, "POST $url (session=$sessionId, source=$source, ${content.length} bytes)")
+        try {
+            http.newCall(httpRequest).execute().use { response ->
+                Log.d(TAG, "POST $url -> HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    throw java.io.IOException("Upload failed for $source: HTTP ${response.code}")
+                }
             }
+        } catch (e: java.io.IOException) {
+            // Covers both a non-2xx response (thrown above) and a transport-level failure
+            // (e.g. UnknownHostException/ConnectException/SocketTimeoutException) - the
+            // latter is the expected failure mode if the VPN isn't actually up by now,
+            // since agentBaseUrl only resolves over Tailscale.
+            Log.e(TAG, "POST $url failed", e)
+            throw e
         }
     }
 }

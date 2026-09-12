@@ -260,7 +260,13 @@ fun WatchLogsContent(
                 StatusRow(
                     state = connectState,
                     buttonLabel = "Connect",
-                    enabled = host.isNotBlank() && connectPort.toIntOrNull() != null,
+                    // Guarded on a successful pair first - `adb connect` against a device
+                    // this session hasn't paired with yet either hangs waiting on a TLS
+                    // handshake the watch never completes, or fails outright, and either
+                    // way it's confusing without the pairing step's own clearer error
+                    // surfaced first. Step order in the UI (pair above, connect below)
+                    // is now also enforced, not just suggested.
+                    enabled = pairState is NenaUiState.Success && host.isNotBlank() && connectPort.toIntOrNull() != null,
                     onClick = { viewModel.connect(host.trim(), connectPort.toInt()) },
                 )
             }
