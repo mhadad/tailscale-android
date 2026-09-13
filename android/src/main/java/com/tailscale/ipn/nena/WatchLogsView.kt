@@ -44,7 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun WatchLogsView(onNavigateBack: () -> Unit) {
+fun WatchLogsView(onNavigateBack: () -> Unit, vpnConnected: Boolean) {
     val viewModel: WatchLogsViewModel = viewModel()
     Scaffold(
         topBar = {
@@ -58,7 +58,12 @@ fun WatchLogsView(onNavigateBack: () -> Unit) {
             )
         },
     ) { padding ->
-        WatchLogsContent(viewModel = viewModel, modifier = Modifier.padding(padding), showDiscoveryHeader = true)
+        WatchLogsContent(
+            viewModel = viewModel,
+            modifier = Modifier.padding(padding),
+            showDiscoveryHeader = true,
+            vpnConnected = vpnConnected,
+        )
     }
 }
 
@@ -73,6 +78,14 @@ fun WatchLogsContent(
     viewModel: WatchLogsViewModel,
     modifier: Modifier = Modifier,
     showDiscoveryHeader: Boolean = false,
+    // Gates pairing on the VPN already showing connected in the top bar. Pairing/connect
+    // themselves only ever talk to the watch over local Wi-Fi (WatchLogsViewModel actually
+    // pauses the VPN for that traffic) - this isn't a technical dependency, it's a
+    // deliberate ordering the user asked for, likely to avoid starting a watch session that
+    // can't reach the finish line: only the final upload step actually needs Tailscale, and
+    // it's a worse failure mode to discover that after already pairing/connecting/pulling a
+    // multi-megabyte logcat than to block the first step until the VPN's connected.
+    vpnConnected: Boolean = true,
 ) {
     val pairState by viewModel.pairState.collectAsState()
     val connectState by viewModel.connectState.collectAsState()
@@ -219,6 +232,13 @@ fun WatchLogsContent(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Step 1 - Pair", style = MaterialTheme.typography.titleSmall)
+                if (!vpnConnected) {
+                    Text(
+                        "Turn on the VPN first - pairing is disabled until it's connected.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = pairPort,
@@ -240,7 +260,7 @@ fun WatchLogsContent(
                 StatusRow(
                     state = pairState,
                     buttonLabel = "Pair",
-                    enabled = host.isNotBlank() && pairPort.toIntOrNull() != null && pairCode.length == 6,
+                    enabled = vpnConnected && host.isNotBlank() && pairPort.toIntOrNull() != null && pairCode.length == 6,
                     onClick = { viewModel.pair(host.trim(), pairPort.toInt(), pairCode) },
                 )
             }

@@ -218,6 +218,23 @@ class MainViewModel(private val appViewModel: AppViewModel) : IpnViewModel() {
           // User wants to turn ON the VPN
           when {
             currentState != Ipn.State.Running -> showVPNPermissionLauncherIfUnauthorized()
+            !isVpnActive.value -> {
+              // The backend's own state machine already thinks it's Running, but the actual
+              // OS-level VPN tunnel never came up (isVpnActive tracks IPNService's own
+              // updateVpnStatus() callback, which fires from the real VpnService.Builder
+              // establish/revoke lifecycle - a separate signal from the backend's logical
+              // state). Confirmed live: dumpsys connectivity showed no VPN network at all
+              // while Notifier.state was already "Running". Most likely caused by
+              // WatchLogsViewModel's own pause/resume-VPN-for-a-watch-session calling
+              // App.stopVPN()/startVPN() directly, outside the normal toggle path, leaving
+              // the two state machines out of sync. The switch itself (bound to
+              // vpnToggleState, which requires both Running AND isVpnActive) correctly
+              // rendered "off" in this state - but tapping it just landed here and no-opped,
+              // so it could never turn "on" again without a real restart to force the
+              // tunnel to actually re-establish.
+              TSLog.w("VpnToggle", "toggleVpn(true): state=Running but isVpnActive=false - self-healing with restartVPN()")
+              restartVPN()
+            }
             else -> TSLog.d("VpnToggle", "toggleVpn(true): already Running, nothing to do")
           }
         } else {

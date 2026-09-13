@@ -157,19 +157,42 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private suspend fun resumeVpnIfNeeded() {
+    /**
+     * Waits not just for the backend's own logical state to say Running, but for the actual
+     * OS-level VPN tunnel to be up (App's appScopedViewModel.vpnActive, driven by
+     * IPNService.updateVpnStatus() - the real VpnService.Builder establish callback).
+     * Confirmed live: these two can desync (Notifier.state == Running while
+     * dumpsys connectivity showed no VPN network at all, causing the exact
+     * SocketTimeoutException below) - checking Notifier.state alone is not sufficient to
+     * know agent-service is actually reachable.
+     */
+    private suspend fun waitForVpnActuallyUp(timeoutMs: Long): Boolean {
+        val vpnActive = App.get().getAppScopedViewModel().vpnActive
+        if (vpnActive.value) return true
+        return withTimeoutOrNull(timeoutMs) { vpnActive.first { it } } != null
+    }
+
+    private suspend fun resumeVpnIfNeeded(): Boolean {
         if (vpnWasRunningBeforePause && Notifier.state.value != Ipn.State.Running) {
             Log.d(TAG, "resuming VPN")
             App.get().startVPN()
             val reachedRunning = withTimeoutOrNull(10_000) { Notifier.state.first { it == Ipn.State.Running } }
             if (reachedRunning == null) {
                 Log.w(TAG, "VPN did not reach Running within 10s of startVPN() - upload will likely fail to reach agent-service")
-            } else {
-                Log.d(TAG, "VPN resumed, now Running")
+                return false
             }
         } else {
             Log.d(TAG, "VPN resume not needed (wasRunningBeforePause=$vpnWasRunningBeforePause, currentState=${Notifier.state.value})")
         }
+        // Running (backend state) alone isn't proof the tunnel is actually up - wait for the
+        // real signal too before declaring success.
+        val actuallyUp = waitForVpnActuallyUp(10_000)
+        if (actuallyUp) {
+            Log.d(TAG, "VPN confirmed up (state=Running, tunnel active)")
+        } else {
+            Log.w(TAG, "VPN state is Running but the tunnel never actually came up within 10s - upload will likely time out")
+        }
+        return actuallyUp
     }
 
     /** Scans for watches currently broadcasting wireless-debugging mDNS services nearby. */
@@ -186,6 +209,15 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
     private var deviceAddress: String? = null
 
     fun pair(host: String, port: Int, pairingCode: String) {
+        // Defense-in-depth alongside the UI's own disabled-until-connected Pair button (see
+        // WatchLogsContent's vpnConnected param) - pairing before the VPN is up risks pairing
+        // successfully, connecting, and pulling a multi-megabyte logcat, only to have the
+        // final upload silently time out (confirmed live: SocketTimeoutException reaching
+        // agent-service's Tailscale-only address without the VPN actually running).
+        if (Notifier.state.value != Ipn.State.Running) {
+            _pairState.value = NenaUiState.Error("Turn on the VPN first")
+            return
+        }
         viewModelScope.launch {
             _pairState.value = NenaUiState.Loading
             _pairState.value = when (val result = adb.pair(host, port, pairingCode)) {
@@ -251,7 +283,16 @@ class WatchLogsViewModel(application: Application) : AndroidViewModel(applicatio
                     val logcat = adb.pullLogcat(address)
                     Log.d(TAG, "pulled from watch: model=$model androidVersion=$version logcatBytes=${logcat.length}")
 
-                    resumeVpnIfNeeded()
+                    if (!resumeVpnIfNeeded()) {
+                        // The pull itself succeeded, but there's no point spending 10s on a
+                        // POST that's certain to time out - fail fast with a message that
+                        // actually points at the fix, instead of the opaque
+                        // SocketTimeoutException this used to surface as.
+                        throw java.io.IOException(
+                            "VPN isn't actually connected, so agent-service is unreachable. " +
+                                "Wait for the VPN toggle to show connected, then tap Stream " +
+                                "logs again (the watch will be re-pulled).")
+                    }
 
                     uploadLog(agentBaseUrl, sessionId, address, model, version, "LOGCAT", logcat)
                     Log.d(TAG, "upload succeeded: session=$sessionId")

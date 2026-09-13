@@ -154,6 +154,7 @@ fun NenaHomeScaffold(
                 viewModel = watchLogsViewModel,
                 modifier = Modifier.padding(padding),
                 showDiscoveryHeader = false,
+                vpnConnected = isOn,
             )
             selectedTab == NenaTab.ACTIVITY -> PlaceholderTabContent(
                 modifier = Modifier.padding(padding),

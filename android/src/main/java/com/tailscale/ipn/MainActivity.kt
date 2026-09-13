@@ -404,7 +404,11 @@ class MainActivity : ComponentActivity() {
                   composable("managedBy") { ManagedByView(backTo("settings")) }
                   composable("userSwitcher") { UserSwitcherView(userSwitcherNav) }
                   composable("watchLogs") {
-                    com.tailscale.ipn.nena.WatchLogsView(onNavigateBack = backTo("settings"))
+                    val vpnConnected by viewModel.vpnToggleState.collectAsState()
+                    com.tailscale.ipn.nena.WatchLogsView(
+                        onNavigateBack = backTo("settings"),
+                        vpnConnected = vpnConnected,
+                    )
                   }
                   composable("permissions") {
                     PermissionsView(
