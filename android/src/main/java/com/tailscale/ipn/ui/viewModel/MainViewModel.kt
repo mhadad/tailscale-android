@@ -202,8 +202,10 @@ class MainViewModel(private val appViewModel: AppViewModel) : IpnViewModel() {
   }
 
   fun toggleVpn(desiredState: Boolean) {
+    TSLog.d("VpnToggle", "toggleVpn(desiredState=$desiredState) called, isToggleInProgress=${isToggleInProgress.value}, currentState=${Notifier.state.value}")
     if (isToggleInProgress.value) {
       // Prevent toggling while a previous toggle is in progress
+      TSLog.w("VpnToggle", "toggleVpn ignored: a previous toggle is still in progress")
       return
     }
 
@@ -216,11 +218,14 @@ class MainViewModel(private val appViewModel: AppViewModel) : IpnViewModel() {
           // User wants to turn ON the VPN
           when {
             currentState != Ipn.State.Running -> showVPNPermissionLauncherIfUnauthorized()
+            else -> TSLog.d("VpnToggle", "toggleVpn(true): already Running, nothing to do")
           }
         } else {
           // User wants to turn OFF the VPN
           if (currentState == Ipn.State.Running) {
             stopVPN()
+          } else {
+            TSLog.d("VpnToggle", "toggleVpn(false): not Running (state=$currentState), nothing to do")
           }
         }
       } finally {

@@ -60,7 +60,13 @@ fun NenaHomeScaffold(
     var searchActive by rememberSaveable { mutableStateOf(false) }
     val watchLogsViewModel: WatchLogsViewModel = viewModel()
     val isOn by mainViewModel.vpnToggleState.collectAsState(initial = false)
-    val toggleEnabled = !mainViewModel.isToggleInProgress.value
+    // Was `!mainViewModel.isToggleInProgress.value` (a one-time StateFlow.value read, not
+    // observed by Compose) - if that read happened to land while a toggle was briefly in
+    // progress, this composition's `toggleEnabled` stayed stuck false forever, with nothing
+    // to trigger a recomposition that would pick up the flag flipping back. collectAsState()
+    // actually subscribes, so the switch reliably re-enables itself.
+    val toggleInProgress by mainViewModel.isToggleInProgress.collectAsState()
+    val toggleEnabled = !toggleInProgress
     val discoveryState by watchLogsViewModel.discoveryState.collectAsState()
     val loggedInUser by mainViewModel.loggedInUser.collectAsState()
 
@@ -84,6 +90,7 @@ fun NenaHomeScaffold(
                             // own dedicated "Log in" button - now gone, since Home no longer
                             // renders ConnectView - used to be the only thing that actually
                             // called login().
+                            android.util.Log.d("NenaHomeToggle", "switch tapped: desired=$desired loggedInUser=$loggedInUser")
                             if (desired && loggedInUser == null) {
                                 mainViewModel.login()
                             } else {
